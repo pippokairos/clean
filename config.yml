@@ -1,11 +1,15 @@
 
 # name of db
 database: prove2
-# json field
-field: data
 # table to work with
 table: ballando.events
+
+# included tuples
+include:
+  - pid
+  - message
+  - data
+  - timestamp
+
 # output stocking file
 stock_file_name: stock.txt
-
-#ok
