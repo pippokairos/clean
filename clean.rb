@@ -19,8 +19,8 @@ def valid_json?(str) # method to define if a string is a valid json
     return false
 end
 
-def add_quotes(str)
-  "\"#{str}\""
+def validate(str) # method to add quotes to non-int and non-json fields
+  str = (int?(str) || valid_json?(str)) ? str : "\"#{str}\""
 end
 
 def write_multiple_json_files(connection, database, table, includes)
@@ -36,7 +36,7 @@ def write_multiple_json_files(connection, database, table, includes)
       rows.each_with_index do |row, row_index|
         value = row.values[0]
         end_of_line = (row_index == rows.count - 1) ? '' : ',' # no comma on last row
-        (int?(value) || valid_json?(value)) ? out.print("    #{value}#{end_of_line}\n") : out.print("    #{add_quotes(value)}#{end_of_line}\n")
+        out.print("    #{validate(value)}#{end_of_line}\n")
       end
 
       field_index == includes.count - 1 ? out.print("  ]\n") : out.print("  ],\n") 
@@ -59,7 +59,7 @@ def write_single_json_file(connection, database, table, includes)
         rows.each_with_index do |row, row_index|
           value = row.values[0]
           end_of_line = (row_index == rows.count - 1) ? '' : ',' # no comma on last row
-          (int?(value) || valid_json?(value)) ? out.print("    #{value}#{end_of_line}\n") : out.print("    #{add_quotes(value)}#{end_of_line}\n")
+          out.print("    #{validate(value)}#{end_of_line}\n")
         end
         out.print("  ]\n}")
       }
