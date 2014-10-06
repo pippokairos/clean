@@ -8,11 +8,11 @@ require "zlib"
 require "archive/tar/minitar"
 include Archive::Tar
 
-def is_int?(str) # method to define if a string represents an integer
+def int?(str) # method to define if a string represents an integer
   !!(str =~ /\A[-+]?[0-9]+\z/)
 end
 
-def is_valid_json?(str) # method to define if a string is a valid json
+def valid_json?(str) # method to define if a string is a valid json
   JSON.parse(str)
     return true
   rescue JSON::ParserError
@@ -23,45 +23,54 @@ def add_quotes(str)
   "\"#{str}\""
 end
 
-def main
-  config = YAML.load_file("config.yml")
+def write_multiple_json_files(connection, database, table, includes)
+  FileUtils.mkdir_p "files" # mkdir if not existing
+  json_file_name = "files/#{database}_#{table}_includes.json"
 
-  database = config["database"]
-  table = config["table"]
-  includes = config["include"]
+  File.open(json_file_name, "a") { |out|
+    out.print("{\n")
+    includes.each_with_index do |field, field_index|
+      rows = connection.exec("SELECT #{field} FROM #{table}")
+      out.print("  \"#{field}\":[\n")
 
-  conn = PG.connect(dbname: "#{database}")
-
-  includes.each do |field|
-    rows = conn.exec("SELECT #{field} FROM #{table}")
-
-    FileUtils.mkdir_p "files" # mkdir if not existing
-    json_file_name = "files/#{database}_#{table}_#{field}.json"
-
-    File.open(json_file_name, "a") { |out| 
-      out.truncate(0) # delete file content 
-      out.print("{\"#{field}\":\n  [\n")
-
-      rows.each_with_index do |row, index|
+      rows.each_with_index do |row, row_index|
         value = row.values[0]
-        if index == rows.count - 1 # last row
-          (is_int?(value) || is_valid_json?(value)) ? out.print("    #{value}\n") : out.print("    #{add_quotes(value)}\n")
-        else
-          (is_int?(value) || is_valid_json?(value)) ? out.print("    #{value},\n") : out.print("    #{add_quotes(value)},\n")
-        end
+        end_of_line = (row_index == rows.count - 1) ? '' : ',' # no comma on last row
+        (int?(value) || valid_json?(value)) ? out.print("    #{value}#{end_of_line}\n") : out.print("    #{add_quotes(value)}#{end_of_line}\n")
       end
 
-      out.print("  ]\n}")
-    }
+      field_index == includes.count - 1 ? out.print("  ]\n") : out.print("  ],\n") 
+      puts "#{rows.count} rows written to #{json_file_name} for the field #{field}"
+    end
+    out.print("}")
+  }
+end
 
-    puts "#{rows.count} rows written to #{json_file_name}"
+def write_single_json_file(connection, database, table, includes)
+    includes.each do |field|
+      rows = connection.exec("SELECT #{field} FROM #{table}")
+  
+      FileUtils.mkdir_p "files" # mkdir if not existing
+      json_file_name = "files/#{database}_#{table}_#{field}.json"
+  
+      File.open(json_file_name, "w") { |out| 
+        out.print("{\"#{field}\":\n  [\n")
+  
+        rows.each_with_index do |row, row_index|
+          value = row.values[0]
+          end_of_line = (row_index == rows.count - 1) ? '' : ',' # no comma on last row
+          (int?(value) || valid_json?(value)) ? out.print("    #{value}#{end_of_line}\n") : out.print("    #{add_quotes(value)}#{end_of_line}\n")
+        end
+        out.print("  ]\n}")
+      }
+      puts "#{rows.count} rows written to #{json_file_name}"
   end
+end
 
-  table_vals = conn.exec("SELECT * FROM #{table}")
+def stock_rows(connection, database, table, stock_file_name, delete_check)
+  table_vals = connection.exec("SELECT * FROM #{table}")
 
-  stock_file_name = "files/#{config["stock_file_name"]}"
-
-  File.open(stock_file_name, "a") { |out|
+  File.open(stock_file_name, "w") { |out|
     table_vals.each do |row|
       out.print("{")
       row.values.each_with_index do |value, index|
@@ -75,11 +84,28 @@ def main
   File.delete(stock_file_name)                             # and delete the file
 
   puts "#{table_vals.cmd_tuples()} rows stocked in tar archive"
+  
+  if delete_check
+    rows = conn.exec("DELETE FROM #{table}")
+    puts "#{rows.cmd_tuples()} rows deleted from the table #{table}"
+  end
+  
+end
 
-  conn.exec("BEGIN") # for testing
-  conn.exec("DELETE FROM #{table}")
-  puts "#{table_vals.cmd_tuples()} rows deleted from the table #{table}"
-  conn.exec("ROLLBACK") # for testing
+def main
+  config = YAML.load_file("config.yml")
+
+  database = config["database"]
+  table = config["table"]
+  includes = config["include"]
+
+  conn = PG.connect(dbname: "#{database}")
+  
+  write_single_json_file(conn, database, table, includes)
+  write_multiple_json_files(conn, database, table, includes)
+  
+  stock_file_name = "files/#{config["stock_file_name"]}"
+  stock_rows(conn, database, table, stock_file_name, false)
 end
 
 main()
