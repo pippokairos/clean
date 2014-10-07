@@ -23,21 +23,25 @@ def validate(str) # method to add quotes to non-int and non-json fields
   str = (int?(str) || valid_json?(str)) ? str : "\"#{str}\""
 end
 
-def write_multiple_json_files(connection, database, table, includes)
+def write_rows_on_file(rows, file)
+  rows.each_with_index do |row, row_index|
+    value = row.values[0]
+    end_of_line = (row_index == rows.count - 1) ? '' : ',' # no comma on last row
+    file.print("    #{validate(value)}#{end_of_line}\n")
+  end
+end
+
+def create_one_file_per_field(connection, database, table, includes)
   FileUtils.mkdir_p "files" # mkdir if not existing
   json_file_name = "files/#{database}_#{table}_includes.json"
 
-  File.open(json_file_name, "a") { |out|
+  File.open(json_file_name, "w") { |out|
     out.print("{\n")
     includes.each_with_index do |field, field_index|
       rows = connection.exec("SELECT #{field} FROM #{table}")
       out.print("  \"#{field}\":[\n")
-
-      rows.each_with_index do |row, row_index|
-        value = row.values[0]
-        end_of_line = (row_index == rows.count - 1) ? '' : ',' # no comma on last row
-        out.print("    #{validate(value)}#{end_of_line}\n")
-      end
+      
+      write_rows_on_file(rows, out)
 
       field_index == includes.count - 1 ? out.print("  ]\n") : out.print("  ],\n") 
       puts "#{rows.count} rows written to #{json_file_name} for the field #{field}"
@@ -46,7 +50,7 @@ def write_multiple_json_files(connection, database, table, includes)
   }
 end
 
-def write_single_json_file(connection, database, table, includes)
+def create_one_file_with_all_fields(connection, database, table, includes)
     includes.each do |field|
       rows = connection.exec("SELECT #{field} FROM #{table}")
   
@@ -56,21 +60,18 @@ def write_single_json_file(connection, database, table, includes)
       File.open(json_file_name, "w") { |out| 
         out.print("{\"#{field}\":\n  [\n")
   
-        rows.each_with_index do |row, row_index|
-          value = row.values[0]
-          end_of_line = (row_index == rows.count - 1) ? '' : ',' # no comma on last row
-          out.print("    #{validate(value)}#{end_of_line}\n")
-        end
+        write_rows_on_file(rows, out)
+        
         out.print("  ]\n}")
       }
       puts "#{rows.count} rows written to #{json_file_name}"
   end
 end
 
-def stock_rows(connection, database, table, stock_file_name, delete_check)
+def create_archive(connection, database, table, archive_file_name, delete_check)
   table_vals = connection.exec("SELECT * FROM #{table}")
 
-  File.open(stock_file_name, "w") { |out|
+  File.open(archive_file_name, "w") { |out|
     table_vals.each do |row|
       out.print("{")
       row.values.each_with_index do |value, index|
@@ -80,10 +81,10 @@ def stock_rows(connection, database, table, stock_file_name, delete_check)
   }
 
   tgz = Zlib::GzipWriter.new(File.open("stock.tgz", "wb")) # create the archive
-  Minitar.pack(stock_file_name, tgz)                       # copy the stock file in it
-  File.delete(stock_file_name)                             # and delete the file
+  Minitar.pack(archive_file_name, tgz)                       # copy the stock file in it
+  File.delete(archive_file_name)                             # and delete the file
 
-  puts "#{table_vals.cmd_tuples()} rows stocked in tar archive"
+  puts "#{table_vals.cmd_tuples()} rows saved in tar archive"
   
   if delete_check
     rows = conn.exec("DELETE FROM #{table}")
@@ -98,14 +99,15 @@ def main
   database = config["database"]
   table = config["table"]
   includes = config["include"]
+  FileUtils.mkdir_p "files" # mkdir if not existing
+  archive_file_name = "files/#config['archive_file_name']"
 
   conn = PG.connect(dbname: "#{database}")
   
-  write_single_json_file(conn, database, table, includes)
-  write_multiple_json_files(conn, database, table, includes)
+  create_one_file_with_all_fields(conn, database, table, includes)
+  create_one_file_per_field(conn, database, table, includes)
   
-  stock_file_name = "files/#{config["stock_file_name"]}"
-  stock_rows(conn, database, table, stock_file_name, false)
+  create_archive(conn, database, table, archive_file_name, false)
 end
 
 main()

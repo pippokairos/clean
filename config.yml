@@ -12,4 +12,4 @@ include:
   - timestamp
 
 # output stocking file
-stock_file_name: stock.txt
+archive_file_name: stock.txt
